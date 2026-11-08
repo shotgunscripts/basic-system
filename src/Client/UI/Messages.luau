@@ -1,0 +1,468 @@
+--Adds message UI functionality to the API.
+--!strict
+
+local MINIMUM_TEXT_SIZE = 12
+local HINT_HEIGHT_RELATIVE = 0.035
+local NOTIFICATION_HEIGHT_RELATIVE = 0.0225
+local MAX_HINTS = 5
+
+local GuiService = game:GetService("GuiService")
+local TextService = game:GetService("TextService")
+local TweenService = game:GetService("TweenService")
+
+local NexusButton = require(script.Parent.Parent:WaitForChild("Packages"):WaitForChild("NexusButton")) :: any
+local Types = require(script.Parent.Parent:WaitForChild("Types"))
+
+local ThemedFrame = NexusButton.ThemedFrame
+local TextButtonFactory = NexusButton.TextButtonFactory
+
+
+
+--[[
+Performs a tween.
+--]]
+local function Tween(Ins: Instance, Tween: TweenInfo, Properties: {[string]: any}, FinishCallback: (() ->())?): ()
+    task.spawn(function()
+        if GuiService.ReducedMotionEnabled then
+            for Name, Value in Properties do
+                (Ins :: any)[Name] = Value
+            end
+        else
+            TweenService:Create(Ins, Tween, Properties):Play()
+            task.wait(Tween.Time)
+        end
+        if not FinishCallback then return end
+        FinishCallback()
+    end)
+end
+
+--[[
+Adds native messages.
+--]]
+local function AddNativeMessages(API: Types.BasicSystemApiClient, Player: Player): ()
+    local BasicSystemMessagesScreenGui = nil
+    
+    --Connect displaying messages.
+    (API.EventContainer:WaitForChild("MessageEvents"):WaitForChild("DisplayMessageLoopback") :: BindableEvent).Event:Connect(function(TopText: string, Message: string, DisplayTime: number?)
+        if API.FeatureFlags:GetFeatureFlag("UseNativeMessageGui") then
+            TopText = TopText or ""
+            Message = Message or ""
+            if not DisplayTime then DisplayTime = (string.len(TopText) + string.len(Message)) * 0.05 + 0.4 end
+
+            --Create the ScreenGui if it doesn't exist.
+            if not BasicSystemMessagesScreenGui or not BasicSystemMessagesScreenGui.Parent then
+                local NewBasicSystemMessagesScreenGui = Instance.new("ScreenGui")
+                NewBasicSystemMessagesScreenGui.Name = "BasicSystemMessagesScreenGui"
+                NewBasicSystemMessagesScreenGui.Parent = Player:FindFirstChild("PlayerGui")
+                NewBasicSystemMessagesScreenGui.DisplayOrder = 50
+                NewBasicSystemMessagesScreenGui.ResetOnSpawn = false
+                BasicSystemMessagesScreenGui = NewBasicSystemMessagesScreenGui
+            end
+
+            --Create the text.
+            local TextSize = math.max(MINIMUM_TEXT_SIZE, BasicSystemMessagesScreenGui.AbsoluteSize.Y * 0.05)
+            local TextLabel = Instance.new("TextLabel")
+            TextLabel.BackgroundTransparency = 0.5
+            TextLabel.BorderSizePixel = 0
+            TextLabel.Size = UDim2.new(1, 0, 1, 0)
+            TextLabel.Position = UDim2.new(0, 0, -1, 0)
+            TextLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            TextLabel.Font = Enum.Font.SourceSans
+            TextLabel.TextWrapped = true
+            TextLabel.Text = Message
+            TextLabel.RichText = true
+            TextLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TextLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            TextLabel.TextStrokeTransparency = 0
+            TextLabel.TextSize = TextSize
+            TextLabel.Parent = BasicSystemMessagesScreenGui
+            
+            local TopTextLabel = Instance.new("TextLabel")
+            TopTextLabel.BackgroundTransparency = 1
+            TopTextLabel.Size = UDim2.new(1, 0, 0, TextSize)
+            TopTextLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            TopTextLabel.Font = Enum.Font.SourceSansBold
+            TopTextLabel.Text = TopText
+            TopTextLabel.RichText = true
+            TopTextLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TopTextLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            TopTextLabel.TextStrokeTransparency = 0
+            TopTextLabel.TextSize = TopTextLabel.AbsoluteSize.Y
+            TopTextLabel.Parent = TextLabel
+            
+            --Connect the event for resizing.
+            local Event = BasicSystemMessagesScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                TextSize = math.max(MINIMUM_TEXT_SIZE, BasicSystemMessagesScreenGui.AbsoluteSize.Y * 0.05)
+                TextLabel.TextSize = TextSize
+                TopTextLabel.Size = UDim2.new(1, 0, 0, TextSize)
+                TopTextLabel.TextSize = TextSize
+            end)
+            
+            --Tween the frame in and out.
+            Tween(TextLabel, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(0, 0, 0, 0),
+            }, function()
+                task.wait(DisplayTime)
+                Tween(TextLabel, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+                    Position = UDim2.new(0, 0, 1, 0),
+                }, function()
+                    TextLabel:Destroy()
+                    Event:Disconnect()
+                end)
+            end)
+        end
+    end)
+end
+
+--[[
+Adds native hints.
+--]]
+local function AddNativeHints(API: Types.BasicSystemApiClient, Player: Player): ()
+    local HintHeight = MINIMUM_TEXT_SIZE
+    local HintsQueue = {} :: {{Frame: TextLabel, Duration: number}}
+    local BasicSystemHintsScreenGui = nil
+
+    --[[
+    Updates the position of the hints.
+    --]]
+    local function UpdateHintPositions()
+        for i, HintData in HintsQueue do
+            Tween(HintData.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(0, 0, 0, (i - 1) * HintHeight)
+            })
+        end
+    end
+
+    --[[
+    Removes a hint.
+    --]]
+    local function RemoveHint(HintData: {Frame: TextLabel, Duration: number}): ()
+        --Determine the index of the hint and return if it doesn't exist.
+        local Index
+        for i, OtherHintData in HintsQueue do
+            if HintData == OtherHintData then
+                Index = i
+                break
+            end
+        end
+        if not Index then return end
+
+        --Remove the hint and update the other hint positions.
+        table.remove(HintsQueue,Index)
+        Tween(HintData.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+            Position = UDim2.new(1, 0, 0, (Index - 1) * HintHeight),
+        }, function()
+            HintData.Frame:Destroy()
+        end)
+        UpdateHintPositions()
+    end
+
+    --[[
+    Inserts a hint into the queue.
+    --]]
+    local function InsertHint(Frame: TextLabel, Duration: number): ()
+        --Insert the hint and update the positions.
+        local HintData = {Frame = Frame,Duration=Duration}
+        table.insert(HintsQueue, 1, HintData)
+        Frame.Parent = BasicSystemHintsScreenGui
+        UpdateHintPositions()
+        
+        --Remove the overflow hints if they exist.
+        local OverflowHint = HintsQueue[MAX_HINTS + 1]
+        if OverflowHint then
+            HintsQueue[MAX_HINTS + 1] = nil
+            Tween(OverflowHint.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(0, 0, 0, MAX_HINTS * HintHeight),
+            }, function()
+                Tween(OverflowHint.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                    Position = UDim2.new(1, 0, 0, MAX_HINTS * HintHeight),
+                }, function()
+                    OverflowHint.Frame:Destroy()
+                end)
+            end)
+        end
+
+        --Remove the notification after the duration.
+        task.wait(Duration)
+        RemoveHint(HintData)
+    end
+
+    --Connect displaying hints.
+    (API.EventContainer:WaitForChild("MessageEvents"):WaitForChild("DisplayHintLoopback") :: BindableEvent).Event:Connect(function(Message: string, DisplayTime: number?)
+        if API.FeatureFlags:GetFeatureFlag("UseNativeHintGui") then
+            Message = Message or ""
+
+            --Create the ScreenGui if it doesn't exist.
+            if not BasicSystemHintsScreenGui or not BasicSystemHintsScreenGui.Parent then
+                local NewBasicSystemHintsScreenGui = Instance.new("ScreenGui")
+                NewBasicSystemHintsScreenGui.Name = "BasicSystemHintsScreenGui"
+                NewBasicSystemHintsScreenGui.Parent = Player:FindFirstChild("PlayerGui")
+                NewBasicSystemHintsScreenGui.ResetOnSpawn = false
+                NewBasicSystemHintsScreenGui.DisplayOrder = 50
+                BasicSystemHintsScreenGui = NewBasicSystemHintsScreenGui
+
+                HintHeight = math.max(MINIMUM_TEXT_SIZE, HINT_HEIGHT_RELATIVE * NewBasicSystemHintsScreenGui.AbsoluteSize.Y)
+                NewBasicSystemHintsScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                    HintHeight = math.max(MINIMUM_TEXT_SIZE, HINT_HEIGHT_RELATIVE * NewBasicSystemHintsScreenGui.AbsoluteSize.Y)
+                    for _, HintData in HintsQueue do
+                        HintData.Frame.Size = UDim2.new(1, 0, 0, HintHeight)
+                    end
+                    UpdateHintPositions()
+                end)
+            end
+
+            --Create the hint frame.
+            local HintFrame = Instance.new("TextLabel")
+            HintFrame.BackgroundTransparency = 0.5 * GuiService.PreferredTransparency
+            HintFrame.BorderSizePixel = 0
+            HintFrame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+            HintFrame.Position = UDim2.new(0, 0, 0, -HintHeight)
+            HintFrame.Size = UDim2.new(1, 0, 0, HintHeight)
+            HintFrame.Font = Enum.Font.SourceSans
+            HintFrame.TextScaled = true
+            HintFrame.TextColor3 = Color3.fromRGB(255, 255, 255)
+            HintFrame.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            HintFrame.Text = Message
+            HintFrame.RichText = true
+            HintFrame.TextStrokeTransparency = 0
+            
+            --Add the hint.
+            InsertHint(HintFrame, DisplayTime or string.len(Message) * 0.05 + 0.4)
+        end
+    end)
+end
+
+--[[
+Adds native hints.
+--]]
+local function AddNativeNotifications(API: Types.BasicSystemApiClient, Player: Player): ()
+    local CurrentNotifications = {} :: {{
+        Frame: Frame,
+        Width: number,
+        Height: number,
+        UpdateSize: (any) -> (),
+        Close: (any) -> (),
+    }}
+    local CloseFactory = TextButtonFactory.CreateDefault(Color3.fromRGB(200, 0, 0))
+    CloseFactory:SetTextDefault("Text", "X")
+    CloseFactory:SetTextDefault("Font", Enum.Font.SciFi)
+    CloseFactory:SetTextDefault("TextStrokeTransparency", 1)
+    local CurrentTextSize = 0
+    local BasicSystemNotificationsScreenGui: ScreenGui?
+
+    --[[
+    Updates the position of the notifications.
+    --]]
+    local function UpdateNotificationPositions(): ()
+        local CurrentHeightOffset = 0
+        for _, Notification in CurrentNotifications do
+            Tween(Notification.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(1, -5, 0.95, -CurrentHeightOffset),
+            })
+            CurrentHeightOffset += Notification.Height + 10
+        end
+    end
+
+    --[[
+    Updates the current text size.
+    --]]
+    local function UpdateNotificationTextSize(): ()
+        --Update the text size.
+        if not BasicSystemNotificationsScreenGui then return end
+        local LastTextSize = CurrentTextSize
+        CurrentTextSize = math.floor(math.max(MINIMUM_TEXT_SIZE, NOTIFICATION_HEIGHT_RELATIVE * BasicSystemNotificationsScreenGui.AbsoluteSize.Y))
+        if LastTextSize == CurrentTextSize then return end
+        
+        --Update the existing notifications.
+        for _, Notification in CurrentNotifications do
+            Notification:UpdateSize()
+        end
+        UpdateNotificationPositions()
+    end
+
+    --Connect displaying notitifcations.
+    (API.EventContainer:WaitForChild("MessageEvents"):WaitForChild("DisplayNotificationLoopback") :: BindableEvent).Event:Connect(function(TopText: string, Message: string, DisplayTime: number?)
+        if API.FeatureFlags:GetFeatureFlag("UseNativeHintGui") then
+            TopText = TopText or ""
+            Message = Message or ""
+
+            --Create the ScreenGui if it doesn't exist.
+            if not BasicSystemNotificationsScreenGui or not BasicSystemNotificationsScreenGui.Parent then
+                local NewBasicSystemNotificationsScreenGui = Instance.new("ScreenGui")
+                NewBasicSystemNotificationsScreenGui.Name = "BasicSystemNotificationsScreenGui"
+                NewBasicSystemNotificationsScreenGui.Parent = Player:FindFirstChild("PlayerGui")
+                NewBasicSystemNotificationsScreenGui.ResetOnSpawn = false
+                NewBasicSystemNotificationsScreenGui.DisplayOrder = 50
+                BasicSystemNotificationsScreenGui = NewBasicSystemNotificationsScreenGui
+
+                NewBasicSystemNotificationsScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(UpdateNotificationTextSize)
+                UpdateNotificationTextSize()
+            end
+
+            --Create the notification frame.
+            local NotificationFrame = Instance.new("Frame")
+            NotificationFrame.BackgroundTransparency = 1
+            NotificationFrame.AnchorPoint = Vector2.new(1, 1)
+            NotificationFrame.Parent = BasicSystemNotificationsScreenGui
+
+            local Background = ThemedFrame.new()
+            Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            Background.BackgroundTransparency = 0.5 * GuiService.PreferredTransparency
+            Background.Size = UDim2.new(1, 0, 1, 0)
+            Background.SliceScaleMultiplier = 0.3
+            Background.Parent = NotificationFrame
+
+            local TopTextLabel = Instance.new("TextLabel")
+            TopTextLabel.BackgroundTransparency = 1
+            TopTextLabel.Position = UDim2.new(0, 5, 0, 0)
+            TopTextLabel.Font = Enum.Font.SourceSansBold
+            TopTextLabel.Text = TopText
+            TopTextLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TopTextLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            TopTextLabel.TextStrokeTransparency = 0
+            TopTextLabel.TextTruncate = Enum.TextTruncate.AtEnd
+            TopTextLabel.TextXAlignment = Enum.TextXAlignment.Left
+            TopTextLabel.Parent = NotificationFrame
+
+            local MessageLabel = Instance.new("TextLabel")
+            MessageLabel.BackgroundTransparency = 1
+            MessageLabel.Font = Enum.Font.SourceSans
+            MessageLabel.TextWrapped = true
+            MessageLabel.Text = Message
+            MessageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            MessageLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            MessageLabel.TextStrokeTransparency = 0
+            MessageLabel.TextXAlignment = Enum.TextXAlignment.Left
+            MessageLabel.Parent = NotificationFrame
+
+            local CloseButton, _ = CloseFactory:Create()
+            CloseButton.Parent = NotificationFrame
+
+            --Create the notification object.
+            local CurrentCloseTimeLabel: TextLabel?
+            local Notification = {
+                Frame = NotificationFrame,
+                Width = 0,
+                Height = 0,
+            }
+
+            --[[
+            Updates the size of the notification.
+            --]]
+            function Notification:UpdateSize(): ()
+                local CurrentBasicSystemNotificationsScreenGui = BasicSystemNotificationsScreenGui :: ScreenGui
+                local ViewportSizeY = CurrentBasicSystemNotificationsScreenGui.AbsoluteSize.Y
+                local NotificationWidth = (0.4 / NOTIFICATION_HEIGHT_RELATIVE) * CurrentTextSize
+                local MessageHeight = TextService:GetTextSize(Message, CurrentTextSize, Enum.Font.SourceSans, Vector2.new(NotificationWidth - 10, ViewportSizeY)).Y
+                local NotificationHeight = CurrentTextSize + MessageHeight
+
+                Notification.Width = NotificationWidth
+                Notification.Height = NotificationHeight
+                NotificationFrame.Size = UDim2.new(0, NotificationWidth, 0, NotificationHeight)
+                TopTextLabel.Size = UDim2.new(1, -(2 * CurrentTextSize), 0, CurrentTextSize)
+                TopTextLabel.TextSize = CurrentTextSize
+                MessageLabel.Position = UDim2.new(0, 5, 0, CurrentTextSize)
+                MessageLabel.Size = UDim2.new(1, -10, 0, MessageHeight)
+                MessageLabel.TextSize = CurrentTextSize
+                CloseButton.Size = UDim2.new(0, 0.8 * CurrentTextSize, 0, 0.8 * CurrentTextSize)
+                CloseButton.Position = UDim2.new(1, -0.9 * CurrentTextSize, 0, 0.1 * CurrentTextSize)
+                if CurrentCloseTimeLabel then
+                    CurrentCloseTimeLabel.Size = UDim2.new(0, 2 * CurrentTextSize, 0, 0.6 * CurrentTextSize)
+                    CurrentCloseTimeLabel.Position = UDim2.new(1, -(3.1 * CurrentTextSize), 0, CurrentTextSize * 0.2)
+                    CurrentCloseTimeLabel.TextSize = CurrentTextSize
+                end
+            end
+
+            --[[
+            Closes the notification.
+            --]]
+            function Notification:Close(): ()
+                --Remove the notification.
+                local Removed = false
+                for i = #CurrentNotifications, 1, -1 do
+                    if CurrentNotifications[i] ~= Notification then continue end
+                    table.remove(CurrentNotifications, i)
+                    Removed = true
+                end
+                if not Removed then return end
+
+                --Hide the notification.
+                Tween(NotificationFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                    AnchorPoint = Vector2.new(0, 1),
+                    Position = UDim2.new(1, 0, 0, NotificationFrame.AbsolutePosition.Y + Notification.Height),
+                }, function()
+                    NotificationFrame:Destroy()
+                end)
+                UpdateNotificationPositions()
+            end
+
+            --Connect closing.
+            CloseButton.MouseButton1Down:Connect(function()
+                Notification:Close()
+            end)
+
+            --Automatically close the notification.
+            if DisplayTime ~= nil then
+                local CloseTimeLabel = Instance.new("TextLabel")
+                CloseTimeLabel.BackgroundTransparency = 1
+                CloseTimeLabel.Font = Enum.Font.SourceSans
+                CloseTimeLabel.Text = ""
+                CloseTimeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+                CloseTimeLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                CloseTimeLabel.TextStrokeTransparency = 0
+                CloseTimeLabel.TextXAlignment = Enum.TextXAlignment.Right
+                CloseTimeLabel.Parent = NotificationFrame
+                CurrentCloseTimeLabel = CloseTimeLabel
+
+                task.spawn(function()
+                    for i = DisplayTime, 1, -1 do
+                        CloseTimeLabel.Text = tostring(i)
+                        task.wait(1)
+                    end
+                    CloseTimeLabel.Text = "0"
+                    Notification:Close()
+                end)
+            end
+
+            --Store the notification and display it.
+            table.insert(CurrentNotifications, 1, Notification)
+            Notification:UpdateSize()
+            NotificationFrame.Position = UDim2.new(1, Notification.Width, 0.95, 0)
+            UpdateNotificationPositions()
+        end
+    end)
+end
+
+--[[
+Adds notifications to the local admin level being changed.
+--]]
+local function AddAdminLevelNotifications(API: Types.BasicSystemApiClient, Player: Player): ()
+    local LastRank: number? = nil
+
+    local function AdminLevelChanged()
+        local Rank = API.Authorization:GetAdminLevel(Player)
+        local ShouldNotify = Rank ~= LastRank and (LastRank ~= nil or Rank >= 0)
+        LastRank = Rank
+        if ShouldNotify and API.FeatureFlags:GetFeatureFlag("DisplayAdminLevelNotifications") then
+            local RankName = API.Configuration:GetRankName(Rank)
+            API.Messages:DisplayNotification("Basic System", `Rank: {RankName}. Use !cmds to see your available commands.`, 7)
+        end
+    end
+
+    --Initialize the admin level.
+    API.Authorization.AdminLevelChanged:Connect(function(OtherPlayer)
+        if Player == OtherPlayer then
+            AdminLevelChanged()
+        end
+    end)
+    AdminLevelChanged()
+end
+
+
+
+return function(API: Types.BasicSystemApiClient, Player: Player)
+    AddNativeMessages(API, Player)
+    AddNativeHints(API, Player)
+    AddNativeNotifications(API, Player)
+    AddAdminLevelNotifications(API, Player)
+end
