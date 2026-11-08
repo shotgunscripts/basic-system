@@ -1,0 +1,10 @@
+{
+    "name": "Basic System Demo Place",
+    "tree": {
+        "$className": "DataModel",
+        "ServerScriptService": {
+            "$className": "ServerScriptService",
+            "Basic System": { "$path": "default.project.json" }
+        }
+    }
+}

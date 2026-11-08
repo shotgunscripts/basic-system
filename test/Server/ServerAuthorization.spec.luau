@@ -1,0 +1,100 @@
+--Tests the ServerAuthorization class.
+--!strict
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Configuration = require(ReplicatedStorage.Packages.BasicSystem.BasicSystem.Common.Configuration)
+local ServerAuthorization = require(ReplicatedStorage.Packages.BasicSystem.BasicSystem.Server.ServerAuthorization)
+
+return function()
+    local MockPlayers, TestServerAuthorization = nil, nil
+    beforeEach(function()
+        TestServerAuthorization = ServerAuthorization.new(Configuration.new({
+            Admins = {
+                [2] = 3,
+                [4] = 2,
+                [5] = 2,
+            },
+            GroupAdminLevels = {
+                [11] = {
+                    [20] = 1,
+                    [40] = 2,
+                    [60] = 3,
+                }
+            },
+        }), Instance.new("Folder"))
+        local Authorization = TestServerAuthorization :: any
+        Authorization.GameId = 1
+        Authorization.CreatorType = Enum.CreatorType.User
+        Authorization.RankStore = nil
+        Authorization.CreatorId = 7
+
+        MockPlayers = {
+            {UserId = 1},
+            {UserId = 2},
+            {UserId = 3},
+            {UserId = 4},
+            {UserId = 5},
+            {UserId = 6},
+            {UserId = 7},
+        } :: {any}
+
+        Authorization.GroupService = {
+            GetGroupsAsync = function(self, Id)
+                if Id == 3 then
+                    return {
+                        {
+                            Id = 12,
+                            Rank = 70,
+                        },
+                    }
+                elseif Id == 4 then
+                    return {
+                        {
+                            Id = 11,
+                            Rank = 70,
+                        },
+                    }
+                elseif Id == 5 then
+                    return {
+                        {
+                            Id = 11,
+                            Rank = 70,
+                        },
+                    }
+                elseif Id == 6 then
+                    return {
+                        {
+                            Id = 11,
+                            Rank = 40,
+                        },
+                    }
+                else
+                    return {}
+                end
+            end
+        }
+    
+        --Add the players.
+        for _, MockPlayer in MockPlayers do
+            (TestServerAuthorization :: any):InitializePlayer(MockPlayer)
+        end
+    end)
+
+    describe("The authorization module on the server", function()
+        it("should return correct admin levels.", function()
+            --Assert that the admin levels are correct.
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[1])).to.equal(-1)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[2])).to.equal(3)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[3])).to.equal(-1)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[4])).to.equal(3)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[5])).to.equal(3)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[6])).to.equal(2)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[7])).to.equal(5)
+
+            --Set an admin level and assert that it is correct.
+            TestServerAuthorization:SetAdminLevel(MockPlayers[2], 4)
+            expect(TestServerAuthorization:GetAdminLevel(MockPlayers[2])).to.equal(4)
+        end)
+    end)
+end

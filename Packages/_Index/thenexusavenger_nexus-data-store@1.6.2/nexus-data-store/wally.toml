@@ -1,0 +1,15 @@
+[package]
+name = "thenexusavenger/nexus-data-store"
+repository = "https://github.com/TheNexusAvenger/Nexus-Data-Store"
+description = "Buffers Roblox DataStore requests and communicates changes to other servers."
+license = "MIT"
+authors = ["TheNexusAvenger"]
+version = "1.6.2"
+
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+exclude = ["**"]
+include = ["src", "src/*", "default.project.json", "wally.lock", "wally.toml"]
+
+[dependencies]

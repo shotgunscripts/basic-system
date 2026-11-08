@@ -1,0 +1,9 @@
+{
+  "name": "nexus-button",
+  "tree": {
+    "$path": "src",
+    "Packages": {
+      "$path": "./dist"
+    }
+  }
+}

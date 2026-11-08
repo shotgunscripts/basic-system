@@ -1,0 +1,17 @@
+{
+    "name": "Basic System Tests",
+    "tree": {
+        "$className": "DataModel",
+        "ReplicatedStorage": {
+            "Packages": {
+                "$className": "Folder",
+                "BasicSystem": { "$path": "module.project.json" }
+            }
+        },
+        "ServerScriptService": {
+            "$className": "ServerScriptService",
+            "Basic System": { "$path": "default.project.json" },
+            "BasicSystemTests": { "$path": "test" }
+        }
+    }
+}

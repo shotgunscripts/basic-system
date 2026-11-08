@@ -1,0 +1,13 @@
+{
+    "name": "BasicSystemMain",
+    "tree": {
+        "$path": "BasicSystemMain.luau",
+        "BasicSystem": {
+            "$path": "src",
+            "Packages": {
+                "$path": "Packages",
+                "Cmdr": { "$path": "module/Cmdr" }
+            }
+        }
+    }
+}

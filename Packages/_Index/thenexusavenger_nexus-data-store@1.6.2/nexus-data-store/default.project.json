@@ -1,0 +1,6 @@
+{
+  "name": "nexus-data-store",
+  "tree": {
+    "$path": "./src"
+  }
+}

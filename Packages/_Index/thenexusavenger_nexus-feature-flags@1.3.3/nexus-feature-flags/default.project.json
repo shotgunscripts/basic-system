@@ -1,0 +1,9 @@
+{
+  "name": "nexus-feature-flags",
+  "tree": {
+    "$path": "./src",
+    "Packages": {
+      "$path": "./dist"
+    }
+  }
+}
